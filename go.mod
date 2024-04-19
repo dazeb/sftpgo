@@ -68,11 +68,11 @@ require (
 	go.etcd.io/bbolt v1.3.8
 	go.uber.org/automaxprocs v1.5.3
 	gocloud.dev v0.36.0
-	golang.org/x/crypto v0.17.0
-	golang.org/x/net v0.19.0
+	golang.org/x/crypto v0.21.0
+	golang.org/x/net v0.23.0
 	golang.org/x/oauth2 v0.15.0
-	golang.org/x/sys v0.15.0
-	golang.org/x/term v0.15.0
+	golang.org/x/sys v0.18.0
+	golang.org/x/term v0.18.0
 	golang.org/x/time v0.5.0
 	google.golang.org/api v0.154.0
 	gopkg.in/natefinch/lumberjack.v2 v2.2.1

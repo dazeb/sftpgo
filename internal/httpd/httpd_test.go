@@ -1598,6 +1598,73 @@ func TestGroupValidation(t *testing.T) {
 	assert.Contains(t, string(resp), "invalid web client options")
 }
 
+func TestGroupPlaceholderWithoutValue(t *testing.T) {
+	base := filepath.Join(os.TempDir(), util.GenerateUniqueID())
+	g := getTestGroup()
+	g.UserSettings.HomeDir = filepath.Join(base, ".%role%.")
+	group, _, err := httpdtest.AddGroup(g, http.StatusCreated)
+	assert.NoError(t, err)
+	u := getTestUser()
+	u.Groups = []sdk.GroupMapping{{Name: group.Name, Type: sdk.GroupTypePrimary}}
+	user, _, err := httpdtest.AddUser(u, http.StatusCreated)
+	assert.NoError(t, err)
+
+	_, err = dataprovider.CheckUserAndPass(defaultUsername, defaultPassword, "", common.ProtocolHTTP)
+	assert.ErrorIs(t, err, dataprovider.ErrPlaceholderUnset)
+	_, err = dataprovider.GetUserWithGroupSettings(defaultUsername, "")
+	assert.ErrorIs(t, err, dataprovider.ErrPlaceholderUnset)
+
+	// with a role the token renders a name
+	r := getTestRole()
+	role, _, err := httpdtest.AddRole(r, http.StatusCreated)
+	assert.NoError(t, err)
+	user.Role = role.Name
+	_, _, err = httpdtest.UpdateUser(user, http.StatusOK, "")
+	assert.NoError(t, err)
+	merged, err := dataprovider.CheckUserAndPass(defaultUsername, defaultPassword, "", common.ProtocolHTTP)
+	assert.NoError(t, err)
+	assert.Equal(t, filepath.Join(base, "."+role.Name+"."), merged.HomeDir)
+
+	// a folder sub-path is the exception: the mapping the account cannot render
+	// is left unmounted, the login is unaffected. The mount is not created at
+	// the folder root, which would widen the scope the sub-path declares
+	folder, _, err := httpdtest.AddFolder(vfs.BaseVirtualFolder{
+		Name:       "tpl_folder",
+		MappedPath: filepath.Join(base, "folder"),
+	}, http.StatusCreated)
+	assert.NoError(t, err)
+	group.UserSettings.HomeDir = ""
+	group.VirtualFolders = []vfs.VirtualFolder{{
+		BaseVirtualFolder: vfs.BaseVirtualFolder{Name: folder.Name},
+		VirtualPath:       "/vdir",
+		Subpath:           "/tenants%role%",
+	}}
+	group, _, err = httpdtest.UpdateGroup(group, http.StatusOK)
+	assert.NoError(t, err)
+	merged, err = dataprovider.GetUserWithGroupSettings(defaultUsername, "")
+	assert.NoError(t, err)
+	if assert.Len(t, merged.VirtualFolders, 1) {
+		assert.Equal(t, "/tenants"+role.Name, merged.VirtualFolders[0].Subpath)
+	}
+	user.Role = ""
+	_, _, err = httpdtest.UpdateUser(user, http.StatusOK, "")
+	assert.NoError(t, err)
+	merged, err = dataprovider.GetUserWithGroupSettings(defaultUsername, "")
+	assert.NoError(t, err)
+	assert.Empty(t, merged.VirtualFolders, "the mapping is dropped, /tenants is not mounted")
+
+	_, err = httpdtest.RemoveUser(user, http.StatusOK)
+	assert.NoError(t, err)
+	_, err = httpdtest.RemoveGroup(group, http.StatusOK)
+	assert.NoError(t, err)
+	_, err = httpdtest.RemoveFolder(folder, http.StatusOK)
+	assert.NoError(t, err)
+	_, err = httpdtest.RemoveRole(role, http.StatusOK)
+	assert.NoError(t, err)
+	err = os.RemoveAll(base)
+	assert.NoError(t, err)
+}
+
 func TestGroupSettingsOverride(t *testing.T) {
 	mappedPath1 := filepath.Join(os.TempDir(), util.GenerateUniqueID())
 	folderName1 := filepath.Base(mappedPath1)

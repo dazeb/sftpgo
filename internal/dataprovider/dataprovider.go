@@ -178,6 +178,9 @@ var (
 	ValidProtocols = []string{protocolSSH, protocolFTP, protocolWebDAV, protocolHTTP}
 	// MFAProtocols defines the supported protocols for multi-factor authentication
 	MFAProtocols = []string{protocolHTTP, protocolSSH, protocolFTP}
+	// ErrPlaceholderUnset is returned when a group setting uses a placeholder
+	// the account has no value for. The login is refused
+	ErrPlaceholderUnset = errors.New("a group setting uses a placeholder the account has no value for")
 	// ErrNoInitRequired defines the error returned by InitProvider if no inizialization/update is required
 	ErrNoInitRequired = errors.New("the data provider is up to date")
 	// ErrInvalidCredentials defines the error to return if the supplied credentials are invalid

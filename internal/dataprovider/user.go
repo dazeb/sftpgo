@@ -1621,6 +1621,11 @@ func (u *User) applyGroupSettings(groupsMapping map[string]Group) {
 		return
 	}
 	replacer := u.getGroupPlacehodersReplacer()
+	defer func() {
+		if replacer.err != nil {
+			providerLog(logger.LevelError, "unable to apply group settings to user %q: %v", u.Username, replacer.err)
+		}
+	}()
 	for _, g := range u.Groups {
 		if g.Type == sdk.GroupTypePrimary {
 			if group, ok := groupsMapping[g.Name]; ok {
@@ -1689,22 +1694,49 @@ func (u *User) loadAndApplyGroupSettings() error {
 		g := groups[idx]
 		u.mergeAdditiveProperties(&g, sdk.GroupTypeSecondary, replacer)
 	}
+	if replacer.err != nil {
+		providerLog(logger.LevelError, "unable to apply group settings to user %q: %v", u.Username, replacer.err)
+		return replacer.err
+	}
 	u.removeDuplicatesAfterGroupMerge()
 	return nil
 }
 
-func (u *User) getGroupPlacehodersReplacer() *strings.Replacer {
-	return strings.NewReplacer("%username%", u.Username, "%role%", u.Role)
+type groupRenderer struct {
+	*strings.Replacer
+	user *User
+	err  error
 }
 
-func (u *User) replacePlaceholder(value string, replacer *strings.Replacer) string {
+func (r *groupRenderer) render(value string) string {
 	if value == "" {
 		return value
 	}
-	return replacer.Replace(value)
+	if r.user.Role == "" && strings.Contains(value, "%role%") {
+		r.fail(value)
+		return value
+	}
+	return r.Replacer.Replace(value)
 }
 
-func (u *User) replaceFsConfigPlaceholders(fsConfig vfs.Filesystem, replacer *strings.Replacer) vfs.Filesystem {
+func (r *groupRenderer) fail(value string) {
+	if r.err == nil {
+		r.err = fmt.Errorf("%w: %q", ErrPlaceholderUnset, value)
+	}
+}
+
+func (u *User) getGroupPlacehodersReplacer() *groupRenderer {
+	return &groupRenderer{
+		Replacer: strings.NewReplacer("%username%", u.Username, "%role%", u.Role),
+		user:     u,
+	}
+}
+
+func (u *User) replacePlaceholder(value string, replacer *groupRenderer) string {
+	return replacer.render(value)
+}
+
+func (u *User) replaceFsConfigPlaceholders(fsConfig vfs.Filesystem, replacer *groupRenderer) vfs.Filesystem {
 	switch fsConfig.Provider {
 	case sdk.S3FilesystemProvider:
 		fsConfig.S3Config.KeyPrefix = u.replacePlaceholder(fsConfig.S3Config.KeyPrefix, replacer)
@@ -1732,7 +1764,7 @@ func (u *User) mergeCryptFsConfig(group *Group) {
 	}
 }
 
-func (u *User) mergeWithPrimaryGroup(group *Group, replacer *strings.Replacer) {
+func (u *User) mergeWithPrimaryGroup(group *Group, replacer *groupRenderer) {
 	if group.UserSettings.HomeDir != "" {
 		u.HomeDir = filepath.Clean(u.replacePlaceholder(group.UserSettings.HomeDir, replacer))
 	}
@@ -1774,7 +1806,7 @@ func (u *User) mergeWithPrimaryGroup(group *Group, replacer *strings.Replacer) {
 	u.mergeAdditiveProperties(group, sdk.GroupTypePrimary, replacer)
 }
 
-func (u *User) mergePrimaryGroupFilters(filters *sdk.BaseUserFilters, replacer *strings.Replacer) {
+func (u *User) mergePrimaryGroupFilters(filters *sdk.BaseUserFilters, replacer *groupRenderer) {
 	if u.Filters.MaxUploadFileSize == 0 {
 		u.Filters.MaxUploadFileSize = filters.MaxUploadFileSize
 	}
@@ -1822,7 +1854,7 @@ func (u *User) mergePrimaryGroupFilters(filters *sdk.BaseUserFilters, replacer *
 	}
 }
 
-func (u *User) mergeAdditiveProperties(group *Group, groupType int, replacer *strings.Replacer) {
+func (u *User) mergeAdditiveProperties(group *Group, groupType int, replacer *groupRenderer) {
 	u.mergeVirtualFolders(group, groupType, replacer)
 	u.mergePermissions(group, groupType, replacer)
 	u.mergeFilePatterns(group, groupType, replacer)
@@ -1836,7 +1868,7 @@ func (u *User) mergeAdditiveProperties(group *Group, groupType int, replacer *st
 	u.Filters.AccessTime = append(u.Filters.AccessTime, group.UserSettings.Filters.AccessTime...)
 }
 
-func (u *User) mergeVirtualFolders(group *Group, groupType int, replacer *strings.Replacer) {
+func (u *User) mergeVirtualFolders(group *Group, groupType int, replacer *groupRenderer) {
 	if len(group.VirtualFolders) > 0 {
 		folderPaths := make(map[string]bool)
 		for _, folder := range u.VirtualFolders {
@@ -1871,18 +1903,21 @@ func countPathSegments(p string) int {
 	return strings.Count(p, "/")
 }
 
-func (u *User) renderSubPathValue(value string, replacer *strings.Replacer) (string, bool) {
+func (u *User) renderSubPathValue(value string, replacer *groupRenderer) (string, bool) {
 	if value == "" || !strings.Contains(value, "%") {
 		return value, true
 	}
-	rendered := util.CleanPath(replacer.Replace(value))
+	if u.Role == "" && strings.Contains(value, "%role%") {
+		return "", false
+	}
+	rendered := util.CleanPath(replacer.render(value))
 	if countPathSegments(rendered) < countPathSegments(value) {
 		return "", false
 	}
 	return rendered, true
 }
 
-func (u *User) mergePermissions(group *Group, groupType int, replacer *strings.Replacer) {
+func (u *User) mergePermissions(group *Group, groupType int, replacer *groupRenderer) {
 	if u.Permissions == nil {
 		u.Permissions = make(map[string][]string)
 	}
@@ -1901,7 +1936,7 @@ func (u *User) mergePermissions(group *Group, groupType int, replacer *strings.R
 	}
 }
 
-func (u *User) mergeFilePatterns(group *Group, groupType int, replacer *strings.Replacer) {
+func (u *User) mergeFilePatterns(group *Group, groupType int, replacer *groupRenderer) {
 	if len(group.UserSettings.Filters.FilePatterns) > 0 {
 		patternPaths := make(map[string]bool)
 		for _, pattern := range u.Filters.FilePatterns {

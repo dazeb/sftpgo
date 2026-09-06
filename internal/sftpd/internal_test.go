@@ -2309,3 +2309,46 @@ func TestOsFsResolvePathSymlinkLoops(t *testing.T) {
 		t.Logf("loop case %q terminated, err=%v", p, err)
 	}
 }
+
+func TestCheckAuthErrorAccountConfig(t *testing.T) {
+	oldConfig := common.Config
+	cfg := common.Config
+	cfg.DefenderConfig.Enabled = true
+	cfg.DefenderConfig.Driver = common.DefenderDriverMemory
+	cfg.DefenderConfig.Threshold = 100
+	cfg.DefenderConfig.ScoreInvalid = 2
+	cfg.DefenderConfig.ScoreValid = 2
+	err := common.Initialize(cfg, 0)
+	require.NoError(t, err)
+
+	t.Cleanup(func() {
+		err := common.Initialize(oldConfig, 0)
+		assert.NoError(t, err)
+	})
+
+	newAuthError := func(err error, username string) error {
+		return &authenticationError{
+			err:         err,
+			loginMethod: dataprovider.SSHLoginMethodPublicKey,
+			username:    username,
+		}
+	}
+	ip := "172.16.44.9"
+	checkAuthError(ip, &ssh.ServerAuthError{
+		Errors: []error{newAuthError(dataprovider.ErrPlaceholderUnset, "misconfigured")},
+	})
+	hosts, err := common.GetDefenderHosts()
+	assert.NoError(t, err)
+	assert.Empty(t, hosts)
+
+	checkAuthError(ip, &ssh.ServerAuthError{
+		Errors: []error{
+			newAuthError(dataprovider.ErrPlaceholderUnset, "misconfigured"),
+			newAuthError(dataprovider.ErrInvalidCredentials, "guessed"),
+		},
+	})
+	hosts, err = common.GetDefenderHosts()
+	assert.NoError(t, err)
+	assert.Len(t, hosts, 1, "the guess following the misconfiguration is scored")
+	common.DeleteDefenderHost(ip)
+}

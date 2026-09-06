@@ -1218,3 +1218,36 @@ func TestPassiveHost(t *testing.T) {
 	assert.NoError(t, err, ip)
 	assert.Equal(t, "127.0.0.1", ip)
 }
+
+func TestLoginMetricsPlaceholderUnset(t *testing.T) {
+	oldConfig := common.Config
+	cfg := common.Config
+	cfg.DefenderConfig.Enabled = true
+	cfg.DefenderConfig.Driver = common.DefenderDriverMemory
+	cfg.DefenderConfig.Threshold = 100
+	cfg.DefenderConfig.ScoreInvalid = 2
+	cfg.DefenderConfig.ScoreValid = 2
+	err := common.Initialize(cfg, 0)
+	require.NoError(t, err)
+
+	t.Cleanup(func() {
+		err := common.Initialize(oldConfig, 0)
+		assert.NoError(t, err)
+	})
+
+	ip := "172.16.34.7"
+	user := dataprovider.User{}
+	user.Username = "ftp_metrics_user"
+	c := &Connection{BaseConnection: common.NewBaseConnection("", common.ProtocolFTP, "", "", user)}
+
+	updateLoginMetrics(&user, ip, dataprovider.LoginMethodPassword, dataprovider.ErrPlaceholderUnset, c)
+	hosts, err := common.GetDefenderHosts()
+	assert.NoError(t, err)
+	assert.Empty(t, hosts)
+
+	updateLoginMetrics(&user, ip, dataprovider.LoginMethodPassword, dataprovider.ErrInvalidCredentials, c)
+	hosts, err = common.GetDefenderHosts()
+	assert.NoError(t, err)
+	assert.Len(t, hosts, 1)
+	common.DeleteDefenderHost(ip)
+}

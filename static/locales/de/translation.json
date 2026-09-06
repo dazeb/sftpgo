@@ -676,7 +676,8 @@
         "token_invalid": "Ungültiges OpenID-Token",
         "role_admin_err": "Falsche OpenID-Rolle: Der angemeldete Benutzer ist kein Administrator",
         "role_user_err": "Falsche OpenID-Rolle: Der angemeldete Benutzer ist ein Administrator",
-        "get_user_err": "Fehler beim Abrufen des mit dem OpenID-Token verknüpften Benutzers"
+        "get_user_err": "Fehler beim Abrufen des mit dem OpenID-Token verknüpften Benutzers",
+        "email_not_verified": "Die E-Mail-Adresse ist vom Identitätsanbieter nicht verifiziert"
     },
     "oauth2": {
         "auth_verify_error": "OAuth2-Code kann nicht überprüft werden!",

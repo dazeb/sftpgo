@@ -676,7 +676,8 @@
         "token_invalid": "无效的 OpenID 令牌",
         "role_admin_err": "OpenID 角色不正确，登录用户不是管理员",
         "role_user_err": "OpenID 角色不正确，登录用户是管理员",
-        "get_user_err": "无法获取与 OpenID 令牌关联的用户"
+        "get_user_err": "无法获取与 OpenID 令牌关联的用户",
+        "email_not_verified": "身份提供程序未验证该电子邮件地址"
     },
     "oauth2": {
         "auth_verify_error": "无法验证 OAuth2 代码",

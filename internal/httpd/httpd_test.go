@@ -28397,7 +28397,11 @@ func startOIDCMockServer() {
 				w.WriteHeader(http.StatusInternalServerError)
 				return
 			}
-			fmt.Fprintf(w, `{"sub":"123","preferred_username":"oidc_user","email":"example@example.com","sftpgo_role":"admin"}`)
+			if r.Header.Get("Authorization") == "Bearer 789" {
+				fmt.Fprintf(w, `{"sub":"123","preferred_username":"oidc_user","email":"example@example.com","sftpgo_role":"admin"}`)
+				return
+			}
+			fmt.Fprintf(w, `{"sub":"123","preferred_username":"oidc_user","email":"example@example.com","email_verified":true,"sftpgo_role":"admin"}`)
 		})
 		http.HandleFunc("/auth/realms/sftpgo/.well-known/openid-configuration", func(w http.ResponseWriter, _ *http.Request) {
 			w.Header().Set("Content-Type", "application/json")

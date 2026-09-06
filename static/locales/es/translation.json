@@ -676,7 +676,8 @@
         "token_invalid": "Token OpenID inválido",
         "role_admin_err": "Rol OpenID incorrecto, el usuario conectado no es un administrador",
         "role_user_err": "Rol OpenID incorrecto, el usuario conectado es un administrador",
-        "get_user_err": "Error al obtener el usuario asociado con el token OpenID"
+        "get_user_err": "Error al obtener el usuario asociado con el token OpenID",
+        "email_not_verified": "La dirección de correo electrónico no está verificada por el proveedor de identidad"
     },
     "oauth2": {
         "auth_verify_error": "No se puede verificar el código OAuth2",

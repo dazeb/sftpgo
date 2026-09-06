@@ -43,6 +43,7 @@ const (
 	adminRoleFieldValue    = "admin"
 	authStateValidity      = 2 * 60 * 1000 // 2 minutes
 	maxWebClientNextLength = 4096
+	emailVerifiedClaim     = "email_verified"
 	tokenUpdateInterval    = 3 * 60 * 1000   // 3 minutes
 	tokenDeleteInterval    = 2 * 3600 * 1000 // 2 hours
 )
@@ -101,6 +102,10 @@ type OIDC struct {
 	// Non-empty ID token claims take precedence over UserInfo claims with the
 	// same name. The UserInfo subject must match the ID token subject.
 	QueryUserInfo bool `json:"query_userinfo" mapstructure:"query_userinfo"`
+	// RequireVerifiedEmail defines whether to accept only users whose "email_verified"
+	// claim is set to true in the ID token or, when QueryUserInfo is enabled,
+	// in the merged claims.
+	RequireVerifiedEmail bool `json:"require_verified_email" mapstructure:"require_verified_email"`
 	// InsecureSkipSignatureCheck causes SFTPGo to skip JWT signature validation.
 	// It's intended for special cases where providers, such as Azure, use the "none"
 	// algorithm. Skipping the signature validation can cause security issues
@@ -180,6 +185,10 @@ func (o *OIDC) initialize() error {
 	}
 	if o.QueryUserInfo && provider.UserInfoEndpoint() == "" {
 		return errors.New("oidc: query_userinfo is enabled but the provider has no userinfo endpoint")
+	}
+	if o.RequireVerifiedEmail && !slices.Contains(o.Scopes, "email") {
+		logger.Warn(logSender, "", "oidc: require_verified_email is enabled and the \"email\" scope is not requested, "+
+			"ensure the provider returns the %q claim", emailVerifiedClaim)
 	}
 	o.provider = provider
 	o.verifier = nil
@@ -808,6 +817,14 @@ func (s *httpdServer) handleOIDCRedirect(w http.ResponseWriter, r *http.Request)
 	if !oauth2Token.Expiry.IsZero() {
 		token.ExpiresAt = util.GetTimeAsMsSinceEpoch(oauth2Token.Expiry)
 	}
+	if err := validateOIDCEmailVerified(claims, s.binding.OIDC.RequireVerifiedEmail); err != nil {
+		logger.Debug(logSender, "", "unable to validate the OpenID email address: %v", err)
+		setFlashMessage(w, r, newFlashMessage(fmt.Sprintf("Unable to validate the OpenID email address: %v", err),
+			util.I18nOIDCEmailNotVerified))
+		doRedirect()
+		doLogout(rawIDToken)
+		return
+	}
 	err = token.parseClaims(claims, s.binding.OIDC.UsernameField, s.binding.OIDC.RoleField,
 		s.binding.OIDC.CustomFields, s.binding.OIDC.getForcedRole(authReq.Audience))
 	if err != nil {
@@ -850,6 +867,23 @@ func (s *httpdServer) handleOIDCRedirect(w http.ResponseWriter, r *http.Request)
 	}
 
 	loginOIDCUser(w, r, token, authReq.Next)
+}
+
+func validateOIDCEmailVerified(claims map[string]any, required bool) error {
+	if !required {
+		return nil
+	}
+	switch v := claims[emailVerifiedClaim].(type) {
+	case bool:
+		if !v {
+			return errors.New("the email address is not verified by the identity provider")
+		}
+		return nil
+	case nil:
+		return fmt.Errorf("missing %q claim required to verify the email address", emailVerifiedClaim)
+	default:
+		return fmt.Errorf("invalid type for the %q claim: %T", emailVerifiedClaim, v)
+	}
 }
 
 func loginOIDCUser(w http.ResponseWriter, r *http.Request, token oidcToken, next string) {

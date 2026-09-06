@@ -134,6 +134,7 @@ var (
 			Scopes:                     []string{"openid", "profile", "email"},
 			CustomFields:               []string{},
 			QueryUserInfo:              false,
+			RequireVerifiedEmail:       false,
 			InsecureSkipSignatureCheck: false,
 			Debug:                      false,
 		},
@@ -1686,6 +1687,12 @@ func getHTTPDOIDCFromEnv(idx int) (httpd.OIDC, bool) {
 	skipSignatureCheck, ok := lookupBoolFromEnv(fmt.Sprintf("SFTPGO_HTTPD__BINDINGS__%v__OIDC__INSECURE_SKIP_SIGNATURE_CHECK", idx))
 	if ok {
 		result.InsecureSkipSignatureCheck = skipSignatureCheck
+		isSet = true
+	}
+
+	requireVerifiedEmail, ok := lookupBoolFromEnv(fmt.Sprintf("SFTPGO_HTTPD__BINDINGS__%v__OIDC__REQUIRE_VERIFIED_EMAIL", idx))
+	if ok {
+		result.RequireVerifiedEmail = requireVerifiedEmail
 		isSet = true
 	}
 

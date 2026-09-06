@@ -305,6 +305,7 @@
           "implicit_roles": false,
           "custom_fields": [],
           "query_userinfo": false,
+          "require_verified_email": false,
           "insecure_skip_signature_check": false,
           "debug": false
         },

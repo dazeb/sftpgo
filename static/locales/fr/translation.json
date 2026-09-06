@@ -676,7 +676,8 @@
         "token_invalid": "Jeton OpenID invalide",
         "role_admin_err": "Rôle OpenID incorrect, l'utilisateur connecté n'est pas un administrateur",
         "role_user_err": "Rôle OpenID incorrect, l'utilisateur connecté est un administrateur",
-        "get_user_err": "Échec de la récupération de l'utilisateur associé au jeton OpenID"
+        "get_user_err": "Échec de la récupération de l'utilisateur associé au jeton OpenID",
+        "email_not_verified": "L'adresse e-mail n'est pas vérifiée par le fournisseur d'identité"
     },
     "oauth2": {
         "auth_verify_error": "Impossible de vérifier le code OAuth2",

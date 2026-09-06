@@ -452,6 +452,170 @@ func TestOIDCQueryUserInfo(t *testing.T) {
 	require.Len(t, oidcMgr.pendingAuths, 0)
 }
 
+func TestValidateOIDCEmailVerified(t *testing.T) {
+	tests := []struct {
+		name     string
+		claims   map[string]any
+		required bool
+		wantErr  bool
+	}{
+		{
+			name:     "check disabled",
+			claims:   map[string]any{"sub": "user1"},
+			required: false,
+			wantErr:  false,
+		},
+		{
+			name:     "verified, boolean claim",
+			claims:   map[string]any{"email_verified": true},
+			required: true,
+			wantErr:  false,
+		},
+		{
+			name:     "not verified, boolean claim",
+			claims:   map[string]any{"email_verified": false},
+			required: true,
+			wantErr:  true,
+		},
+		{
+			name:     "invalid claim type, string",
+			claims:   map[string]any{"email_verified": "true"},
+			required: true,
+			wantErr:  true,
+		},
+		{
+			name:     "invalid claim type, number",
+			claims:   map[string]any{"email_verified": float64(1)},
+			required: true,
+			wantErr:  true,
+		},
+		{
+			name:     "missing claim",
+			claims:   map[string]any{"sub": "user1"},
+			required: true,
+			wantErr:  true,
+		},
+		{
+			name:     "null claim",
+			claims:   map[string]any{"email_verified": nil},
+			required: true,
+			wantErr:  true,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := validateOIDCEmailVerified(tt.claims, tt.required)
+			if tt.wantErr {
+				assert.Error(t, err)
+			} else {
+				assert.NoError(t, err)
+			}
+		})
+	}
+}
+
+func TestOIDCRequireVerifiedEmail(t *testing.T) {
+	oidcMgr, ok := oidcMgr.(*memoryOIDCManager)
+	require.True(t, ok)
+	server := getTestOIDCServer()
+	server.binding.OIDC.RequireVerifiedEmail = true
+	err := server.binding.OIDC.initialize()
+	assert.NoError(t, err)
+	err = server.initializeRouter()
+	require.NoError(t, err)
+
+	admin := dataprovider.Admin{
+		Username:    "oidc_user",
+		Password:    "p",
+		Permissions: []string{dataprovider.PermAdminAny},
+		Status:      1,
+	}
+	err = dataprovider.AddAdmin(&admin, "", "", "")
+	assert.NoError(t, err)
+	defer func() {
+		err := dataprovider.DeleteAdmin(admin.Username, "", "", "")
+		assert.NoError(t, err)
+	}()
+
+	token := (&oauth2.Token{
+		AccessToken: "123",
+		Expiry:      time.Now().Add(5 * time.Minute),
+	}).WithExtra(map[string]any{"id_token": "id_token_val"})
+	server.binding.OIDC.oauth2Config = &mockOAuth2Config{
+		tokenSource: &mockTokenSource{},
+		token:       token,
+	}
+
+	doLogin := func(idTokenClaims string) *httptest.ResponseRecorder {
+		authReq := newTestOIDCPendingAuth(tokenAudienceWebAdmin)
+		oidcMgr.addPendingAuth(authReq)
+		idToken := &oidc.IDToken{
+			Nonce:   authReq.Nonce,
+			Expiry:  time.Now().Add(5 * time.Minute),
+			Subject: "123",
+		}
+		setIDTokenClaims(idToken, []byte(idTokenClaims))
+		server.binding.OIDC.verifier = &mockOIDCVerifier{token: idToken}
+		rr := httptest.NewRecorder()
+		r, err := newOIDCRedirectRequest(authReq)
+		assert.NoError(t, err)
+		server.router.ServeHTTP(rr, r)
+		return rr
+	}
+
+	// a missing email_verified claim rejects the login
+	rr := doLogin(`{"sub":"123","preferred_username":"oidc_user","sftpgo_role":"admin"}`)
+	assert.Equal(t, http.StatusFound, rr.Code)
+	assert.Equal(t, webAdminLoginPath, rr.Header().Get("Location"))
+	require.Len(t, oidcMgr.tokens, 0)
+	require.Len(t, oidcMgr.pendingAuths, 0)
+
+	// an email_verified claim set to false rejects the login
+	rr = doLogin(`{"sub":"123","preferred_username":"oidc_user","sftpgo_role":"admin","email_verified":false}`)
+	assert.Equal(t, http.StatusFound, rr.Code)
+	assert.Equal(t, webAdminLoginPath, rr.Header().Get("Location"))
+	require.Len(t, oidcMgr.tokens, 0)
+
+	// an email_verified claim set to true allows the login
+	rr = doLogin(`{"sub":"123","preferred_username":"oidc_user","sftpgo_role":"admin","email_verified":true}`)
+	assert.Equal(t, http.StatusFound, rr.Code, rr.Body.String())
+	assert.Equal(t, webUsersPath, rr.Header().Get("Location"))
+	require.Len(t, oidcMgr.tokens, 1)
+	for k := range oidcMgr.tokens {
+		oidcMgr.removeToken(k)
+	}
+
+	// the claim can also be provided by the user info endpoint
+	server.binding.OIDC.QueryUserInfo = true
+	rr = doLogin(`{"sub":"123","preferred_username":"oidc_user","sftpgo_role":"admin"}`)
+	assert.Equal(t, http.StatusFound, rr.Code, rr.Body.String())
+	assert.Equal(t, webUsersPath, rr.Header().Get("Location"))
+	require.Len(t, oidcMgr.tokens, 1)
+	for k := range oidcMgr.tokens {
+		oidcMgr.removeToken(k)
+	}
+
+	// the ID token claim takes precedence over the user info one, which is set to true
+	rr = doLogin(`{"sub":"123","preferred_username":"oidc_user","sftpgo_role":"admin","email_verified":false}`)
+	assert.Equal(t, http.StatusFound, rr.Code)
+	assert.Equal(t, webAdminLoginPath, rr.Header().Get("Location"))
+	require.Len(t, oidcMgr.tokens, 0)
+
+	// the login is rejected if neither source provides the claim
+	server.binding.OIDC.oauth2Config = &mockOAuth2Config{
+		tokenSource: &mockTokenSource{},
+		token: (&oauth2.Token{
+			AccessToken: "789",
+			Expiry:      time.Now().Add(5 * time.Minute),
+		}).WithExtra(map[string]any{"id_token": "id_token_val"}),
+	}
+	rr = doLogin(`{"sub":"123","preferred_username":"oidc_user","sftpgo_role":"admin"}`)
+	assert.Equal(t, http.StatusFound, rr.Code)
+	assert.Equal(t, webAdminLoginPath, rr.Header().Get("Location"))
+	require.Len(t, oidcMgr.tokens, 0)
+	require.Len(t, oidcMgr.pendingAuths, 0)
+}
+
 func TestOIDCLoginLogout(t *testing.T) {
 	tokenValidationMode = 2
 
